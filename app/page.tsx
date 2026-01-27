@@ -1,14 +1,99 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSession } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import Aurora from "@/components/Aurora";
 import { Meteors } from "@/components/ui/meteors";
 import { TypingAnimation } from "@/components/ui/typing-animation";
 import { RainbowButton } from "@/components/ui/rainbow-button";
 import { AuthModal } from "@/components/ui/auth-modal";
 
+type AnalysisResult = {
+  matchedSkills: string[];
+  missingSkills: string[];
+  highlightProject: string;
+  pitch: string;
+};
+
+
 export default function Home() {
+
+  const { data: session, status } = useSession();
+  const isAuthenticated = !!session;
+  const searchParams = useSearchParams();
+
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleAnalyze() {
+    setLoading(true);
+  
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          jobDescription: "Looking for a React + Next.js developer",
+          portfolioText: "Built projects using React, Next.js, Tailwind",
+        }),
+      });
+  
+      const data = await res.json();
+      setAnalysisResult(data);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  }
+  
+
+  function handleGetStarted() {
+    if (!isAuthenticated) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+
+    handleAnalyze();
+  }
+
+  function handleAuthSuccess() {
+    setIsAuthModalOpen(false);
+    // The session will update automatically via useSession
+    // After a brief moment, proceed with analysis
+    setTimeout(() => {
+      handleAnalyze();
+    }, 500);
+  }
+
+  // Check for OAuth errors in URL and open modal if error exists
+  useEffect(() => {
+    const error = searchParams.get("error");
+    if (error) {
+      setIsAuthModalOpen(true);
+      // Clean up URL by removing error parameter
+      const url = new URL(window.location.href);
+      url.searchParams.delete("error");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [searchParams]);
+
+  // Close modal and trigger analysis when user becomes authenticated
+  // This handles OAuth redirects where user comes back authenticated
+  useEffect(() => {
+    if (isAuthenticated && isAuthModalOpen) {
+      setIsAuthModalOpen(false);
+      // Trigger analysis after authentication
+      setTimeout(() => {
+        handleAnalyze();
+      }, 500);
+    }
+  }, [isAuthenticated, isAuthModalOpen]);
+  
 
   return (
     <main className="relative min-h-screen flex items-center justify-center overflow-hidden bg-background text-foreground">
@@ -25,7 +110,7 @@ export default function Home() {
 
 
 
-      <Meteors number={40} />
+      <Meteors number={30} />
 
       
       <div className="relative z-20 max-w-3xl text-center px-6">
@@ -49,7 +134,7 @@ export default function Home() {
         <div className="mt-8 flex justify-center">
           <RainbowButton
             className="px-5 py-4 text-base font-semibold"
-            onClick={() => setIsAuthModalOpen(true)}
+            onClick={handleGetStarted}
           >
             Get started
           </RainbowButton>
@@ -59,7 +144,9 @@ export default function Home() {
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
+        onSuccess={handleAuthSuccess}
       />
+
     </main>
   );
 }
