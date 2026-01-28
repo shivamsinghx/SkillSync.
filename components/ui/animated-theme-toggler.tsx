@@ -19,7 +19,6 @@ export const AnimatedThemeToggler = ({
   const buttonRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
-    // Apply saved theme on first mount
     const storedTheme = localStorage.getItem("theme")
     if (storedTheme === "dark") {
       document.documentElement.classList.add("dark")

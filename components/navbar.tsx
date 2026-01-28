@@ -17,12 +17,9 @@ export function Navbar() {
             shadow-lg
           "
         >
-          {/* Brand */}
           <span className="pl-5 text-lg font-semibold tracking-tight">
             SkillSync
           </span>
-
-          {/* Theme Toggle */}
           <div className="pr-4">
             <AnimatedThemeToggler />
           </div>

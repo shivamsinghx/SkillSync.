@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { analyzeSkillFit } from "@/lib/gemini";
 
 type AnalyzeRequest = {
   jobDescription: string;
@@ -6,41 +9,37 @@ type AnalyzeRequest = {
 };
 
 export async function POST(req: Request) {
+  const session = await getServerSession(authOptions);
+
+  if (!session) {
+    return NextResponse.json(
+      { error: "Unauthorized" },
+      { status: 401 }
+    );
+  }
+
   try {
     const body = (await req.json()) as AnalyzeRequest;
-
     const { jobDescription, portfolioText } = body;
 
     if (!jobDescription || !portfolioText) {
       return NextResponse.json(
-        { error: "Job description and portfolio text are required." },
-        { status: 400 }
-      );
-    }
-
-    const jobSkills = ["React", "Next.js", "Tailwind", "Node.js"];
-    const portfolioSkills = ["React", "Next.js", "Tailwind"];
-
-    const matchedSkills = jobSkills.filter(skill =>
-      portfolioSkills.includes(skill)
+        { error: "Job description and portfolio text are required" },
+      { status: 400 }
     );
+  }
 
-    const missingSkills = jobSkills.filter(
-      skill => !portfolioSkills.includes(skill)
-    );
+  const analysis = await analyzeSkillFit({
+      jobDescription,
+      portfolioText,
+    });
 
-    const response = {
-      matchedSkills,
-      missingSkills,
-      highlightProject: "SkillSync UI Platform",
-      pitch: `Hi there! I reviewed your job posting and noticed you're looking for a frontend-focused developer with strong React and Next.js experience. I've built responsive, modern interfaces using Tailwind and component-driven design. While I’m currently strengthening my Node.js backend experience, I’m confident in delivering high-quality results for this role.`,
-    };
-
-    return NextResponse.json(response);
+    return NextResponse.json(analysis);
   } catch (error) {
-    console.error("Analyze API error:", error);
+    console.error("Analyze error:", error);
+
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Failed to analyze skill fit" },
       { status: 500 }
     );
   }

@@ -24,15 +24,10 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     setIsLoading(true)
     setError(null)
     try {
-      // For OAuth providers, allow redirect to their sign-in pages
-      // The user will be redirected to Google/GitHub, authenticate there,
-      // and then be redirected back to our app
       await signIn(provider, {
         callbackUrl: window.location.href,
-        redirect: true, // Allow redirect to OAuth provider
+        redirect: true,
       })
-      // Note: This code won't execute if redirect is true, as the page will redirect
-      // The onSuccess callback will be handled after the redirect back
     } catch (err) {
       setError(`An error occurred during ${provider} sign in.`)
       console.error(err)
@@ -45,10 +40,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       onClick={onClose}
     >
-      
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      
-      
       <div
         className="relative w-full max-w-md bg-card rounded-2xl shadow-2xl"
         onClick={(e) => e.stopPropagation()}
@@ -59,9 +51,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
           duration={14}
           shineColor={["#ff0080", "#ff8c00", "#40e0d0"]}
         />
-        
         <div className="relative p-8">
-          
           <button
             onClick={onClose}
             className="absolute top-4 right-4 p-2 rounded-full hover:bg-accent transition-colors"
@@ -69,8 +59,6 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
           >
             <X className="h-4 w-4" />
           </button>
-
-          
           <div className="mb-8">
             <h2 className="text-3xl font-bold mb-2">
               Welcome to SkillSync! 👋🏻
@@ -79,8 +67,6 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
               Your next job is just a sign-up away
             </p>
           </div>
-
-          
           {error && (
             <div className="mb-4 p-3 text-sm text-red-500 bg-red-500/10 rounded-lg border border-red-500/20">
               {error}
