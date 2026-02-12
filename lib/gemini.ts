@@ -1,11 +1,17 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-
 export async function analyzeSkillFit(input: {
   jobDescription: string;
   portfolioText: string;
 }) {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error(
+      "GEMINI_API_KEY is not set. Add it to your .env.local (get a key from https://aistudio.google.com/apikey)."
+    );
+  }
+
+  const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
     model: "gemini-1.5-flash",
   });
@@ -42,5 +48,11 @@ ${input.portfolioText}
     .replace(/```/g, "")
     .trim();
 
-  return JSON.parse(cleaned);
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    throw new Error(
+      "Gemini returned invalid JSON. Please try again or shorten your inputs."
+    );
+  }
 }

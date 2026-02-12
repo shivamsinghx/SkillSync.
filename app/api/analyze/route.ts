@@ -9,7 +9,19 @@ type AnalyzeRequest = {
 };
 
 export async function POST(req: Request) {
-  const session = await getServerSession(authOptions);
+  let session;
+  try {
+    session = await getServerSession(authOptions);
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "";
+    if (name === "JWEDecryptionFailed" || name === "JWTExpired") {
+      return NextResponse.json(
+        { error: "Session expired or invalid. Please sign out and sign in again." },
+        { status: 401 }
+      );
+    }
+    throw err;
+  }
 
   if (!session) {
     return NextResponse.json(
@@ -38,8 +50,14 @@ export async function POST(req: Request) {
   } catch (error) {
     console.error("Analyze error:", error);
 
+    let message = "Failed to analyze skill fit";
+    if (error instanceof Error) {
+      message = error.message;
+    } else if (error && typeof (error as { message?: string }).message === "string") {
+      message = (error as { message: string }).message;
+    }
     return NextResponse.json(
-      { error: "Failed to analyze skill fit" },
+      { error: message },
       { status: 500 }
     );
   }

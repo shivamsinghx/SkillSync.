@@ -40,6 +40,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [usageInfo, setUsageInfo] = useState<{ usedToday?: number; limit?: number | null; plan?: string } | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [imageError, setImageError] = useState(false);
 
   const loadHistory = useCallback(async () => {
     try {
@@ -98,11 +99,17 @@ export default function Home() {
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
+        const text = await res.text();
+        let err: { error?: string; code?: string; limit?: number } = {};
+        try {
+          err = text ? JSON.parse(text) : {};
+        } catch {
+          err = { error: text?.slice(0, 200) || `Request failed (${res.status})` };
+        }
         if (res.status === 429 && err.code === "LIMIT_REACHED") {
           setError(`You've hit the daily limit of ${err.limit} analyses on the free plan.`);
         } else {
-          setError(err.error || "Something went wrong while analyzing.");
+          setError(err.error || `Request failed (${res.status}). Try again.`);
         }
         return;
       }
@@ -117,7 +124,8 @@ export default function Home() {
       await loadHistory();
     } catch (error) {
       console.error(error);
-      setError("Something went wrong while analyzing.");
+      const msg = error instanceof Error ? error.message : "Something went wrong while analyzing.";
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -149,6 +157,11 @@ export default function Home() {
       loadHistory();
     }
   }, [isAuthenticated, loadHistory]);
+
+  useEffect(() => {
+    // Reset image error when session or image URL changes
+    setImageError(false);
+  }, [session?.user?.image]);
 
   const handleCopyPitch = async () => {
     if (!analysisResult?.pitch) return;
@@ -225,11 +238,13 @@ export default function Home() {
         <header className="pointer-events-none fixed top-4 right-4 z-30">
           <div className="pointer-events-auto flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-linear-to-br from-emerald-500 to-sky-500 text-xs font-semibold text-white overflow-hidden">
-              {session.user.image ? (
+              {session.user.image && !imageError ? (
                 <img
                   src={session.user.image}
                   alt={session.user.name || session.user.email || "User avatar"}
                   className="h-full w-full object-cover"
+                  referrerPolicy="no-referrer"
+                  onError={() => setImageError(true)}
                 />
               ) : (
                 initials
@@ -261,12 +276,14 @@ export default function Home() {
             See where you match. Fix what you don't.
           </p>
 
-          <p className="mt-6 text-sm md:text-base text-muted-foreground leading-relaxed">
-            SkillSync analyzes job requirements and compares them with your
-            portfolio to identify skill gaps, highlight your strongest projects,
-            and generate a tailored pitch that helps you stand out and get hired
-            FASTERRR.
-          </p>
+          {!isAuthenticated && (
+            <p className="mt-6 text-sm md:text-base text-muted-foreground leading-relaxed">
+              SkillSync analyzes job requirements and compares them with your
+              portfolio to identify skill gaps, highlight your strongest projects,
+              and generate a tailored pitch that helps you stand out and get hired
+              FASTERRR.
+            </p>
+          )}
 
           {!isAuthenticated && (
             <div className="mt-8 flex justify-center">
