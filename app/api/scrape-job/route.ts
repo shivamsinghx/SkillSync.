@@ -22,6 +22,18 @@ export async function POST(req: Request) {
       );
     }
 
+    // LinkedIn requires a logged-in browser session — server-side fetch always
+    // receives a login page instead of the job description.
+    if (/linkedin\.com/i.test(url)) {
+      return NextResponse.json(
+        {
+          error:
+                "LinkedIn blocks server-side requests. Paste the URL into the job description box and use the PitchGap Importer bookmarklet to fetch it via your browser session.",
+        },
+        { status: 422 }
+      );
+    }
+
     const response = await fetch(url);
 
     if (!response.ok) {

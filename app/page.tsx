@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import Aurora from "@/components/Aurora";
@@ -10,6 +10,28 @@ import { RainbowButton } from "@/components/ui/rainbow-button";
 import { AuthModal } from "@/components/ui/auth-modal";
 import { Button } from "@/components/ui/button";
 import { LogOut } from "lucide-react";
+
+import * as pdfjs from "pdfjs-dist";
+
+
+pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+
+async function extractTextFromPDF(file: File): Promise<string> {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+  let fullText = "";
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const textContent = await page.getTextContent();
+    const pageText = textContent.items
+      .map((item: any) => item.str)
+      .join(" ");
+    fullText += pageText + "\n";
+  }
+  return fullText;
+}
+
 
 type AnalysisResult = {
   id?: string;
@@ -42,6 +64,90 @@ export default function Home() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [imageError, setImageError] = useState(false);
 
+  // ── LinkedIn popup-import ────────────────────────────────────────────────
+  const popupRef = useRef<Window | null>(null);
+  const bookmarkletRef = useRef<HTMLAnchorElement>(null);
+
+  /** True when the job-description field contains a LinkedIn URL. */
+  const isLinkedInUrl = /^https?:\/\/(www\.)?linkedin\.com/i.test(jobDescription.trim());
+
+  /**
+   * Bookmarklet href — generated on the client so it embeds the correct
+   * app origin.  The script:
+   *   1. Reads the job description from the LinkedIn DOM.
+   *   2a. If opened from our popup  → postMessage back, then closes itself.
+   *   2b. Otherwise (standalone tab) → redirects to our app with ?jd=…
+   */
+  const bookmarkletHref = useMemo(() => {
+    if (typeof window === 'undefined') return '#';
+    const origin = window.location.origin;
+    return (
+      `javascript:(function(){` +
+      `var s=['.jobs-description-content__text',` +
+      `'.jobs-description-content__text--stretch',` +
+      `'#job-details',` +
+      `'.jobs-description__content'];` +
+      `var t='';` +
+      `for(var i=0;i<s.length;i++){` +
+      `var el=document.querySelector(s[i]);` +
+      `if(el&&el.innerText.trim().length>50){t=el.innerText.trim();break;}}` +
+      `if(!t){` +
+      `var els=document.querySelectorAll('[class*="description"]');` +
+      `for(var j=0;j<els.length;j++){` +
+      `if(els[j].innerText.trim().length>200){t=els[j].innerText.trim();break;}}}` +
+      `if(!t){alert('Could not find the job description. Make sure you are on a LinkedIn job page.');return;}` +
+      `if(window.opener&&!window.opener.closed){` +
+      `window.opener.postMessage({type:'PITCHGAP_JOB_IMPORT',jobDescription:t},'*');` +
+      `setTimeout(function(){window.close();},800);}` +
+      `else{window.location.href='${origin}/?jd='+encodeURIComponent(t.substring(0,6000));}` +
+      `})();`
+    );
+  }, []);
+
+  /**
+   * React blocks `javascript:` hrefs as a security measure, so we bypass it
+   * by setting the attribute directly on the DOM node after mount.
+   * This lets the browser treat the <a> as a real draggable bookmarklet link.
+   */
+  useEffect(() => {
+    if (bookmarkletRef.current && bookmarkletHref !== '#') {
+      bookmarkletRef.current.setAttribute('href', bookmarkletHref);
+    }
+  }, [bookmarkletHref]);
+
+  /** Listen for the postMessage the bookmarklet sends when run inside our popup. */
+  useEffect(() => {
+    function onImportMessage(event: MessageEvent) {
+      if (
+        event.data &&
+        typeof event.data === 'object' &&
+        event.data.type === 'PITCHGAP_JOB_IMPORT' &&
+        typeof event.data.jobDescription === 'string' &&
+        event.data.jobDescription.trim().length > 0
+      ) {
+        setJobDescription(event.data.jobDescription);
+        // Close the popup if it's still open
+        if (popupRef.current && !popupRef.current.closed) {
+          popupRef.current.close();
+        }
+      }
+    }
+    window.addEventListener('message', onImportMessage);
+    return () => window.removeEventListener('message', onImportMessage);
+  }, []);
+
+  /** Handle ?jd= fallback: bookmarklet ran in a standalone tab, not a popup. */
+  useEffect(() => {
+    const jd = searchParams.get('jd');
+    if (jd && jd.trim().length > 0) {
+      setJobDescription(jd);
+      const url = new URL(window.location.href);
+      url.searchParams.delete('jd');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [searchParams]);
+  // ─────────────────────────────────────────────────────────────────────────
+
   const loadHistory = useCallback(async () => {
     try {
       const res = await fetch("/api/history");
@@ -55,31 +161,41 @@ export default function Home() {
 
   async function handleAnalyze() {
     if (!jobDescription || (!resumeText && !resumeFile)) {
-      setError("Add a job description (or link) and upload your resume (or paste it).");
+      setError("Add a linkedin job description (or link) and upload your resume (or paste it).");
       return;
     }
 
     setError(null);
     setLoading(true);
 
+    // --- START OF MODIFICATION AT LINE 87 ---
     try {
       let jobDescriptionToUse = jobDescription.trim();
+      let portfolioTextToUse = resumeText.trim(); // Default to pasted text
 
+      // NEW: Extract text if a file is uploaded
+      if (resumeFile) {
+        try {
+          portfolioTextToUse = await extractTextFromPDF(resumeFile);
+        } catch (err) {
+          setError("Failed to read the PDF. Try pasting the text instead.");
+          setLoading(false);
+          return;
+        }
+      }
+
+      // Existing scraping logic
       if (/^https?:\/\//i.test(jobDescriptionToUse)) {
         const scrapeRes = await fetch("/api/scrape-job", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url: jobDescriptionToUse }),
         });
 
         if (!scrapeRes.ok) {
           const scrapeErr = await scrapeRes.json().catch(() => ({}));
-          setError(
-            scrapeErr.error ||
-              "Couldn't extract the job description from that link. Try pasting the text instead."
-          );
+          setError(scrapeErr.error || "Couldn't extract the job description.");
+          setLoading(false); // Make sure to reset loading
           return;
         }
 
@@ -87,16 +203,16 @@ export default function Home() {
         jobDescriptionToUse = scraped.jobDescription || jobDescriptionToUse;
       }
 
+      // API CALL: Now using 'portfolioTextToUse' instead of 'resumeText'
       const res = await fetch("/api/analyze", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           jobDescription: jobDescriptionToUse,
-          portfolioText: resumeText,
+          portfolioText: portfolioTextToUse, 
         }),
       });
+// --- END OF MODIFICATION ---
 
       if (!res.ok) {
         const text = await res.text();
@@ -129,6 +245,17 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleOpenLinkedInPopup() {
+    const url = jobDescription.trim();
+    if (!isLinkedInUrl) return;
+    const popup = window.open(
+      url,
+      'linkedin_job_popup',
+      'width=1200,height=800,scrollbars=yes,resizable=yes'
+    );
+    if (popup) popupRef.current = popup;
   }
 
   function handleGetStarted() {
@@ -314,10 +441,62 @@ export default function Home() {
               </label>
               <textarea
                 className="w-full rounded-lg border border-border bg-background/80 px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/60 min-h-[120px] resize-y"
-                placeholder="Paste the job description or a job post URL here"
+                placeholder="Paste the job description text, or a LinkedIn job URL"
                 value={jobDescription}
                 onChange={(e) => setJobDescription(e.target.value)}
               />
+
+              {/* LinkedIn popup-import helper — shown when user pastes a LinkedIn URL */}
+              {isLinkedInUrl && (
+                <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 space-y-3">
+                  <p className="text-sm font-semibold text-amber-400">
+                    🔗 LinkedIn URL detected
+                  </p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    LinkedIn blocks server-side requests, but your <strong>browser already has your session</strong>.
+                    Use the 2-step flow below to import the job description automatically—no copy-paste needed.
+                  </p>
+
+                  {/* Step 1 — install bookmarklet once */}
+                  <div className="rounded-lg border border-border bg-background/60 p-3 space-y-1.5">
+                    <p className="text-xs font-medium text-foreground">
+                      Step 1 &mdash; one-time setup: drag this to your bookmarks bar
+                    </p>
+                    {/* href is set imperatively via ref to bypass React’s javascript: URL block */}
+                    <a
+                      ref={bookmarkletRef}
+                      onClick={(e) => e.preventDefault()}
+                      draggable
+                      className="inline-flex cursor-grab items-center gap-1.5 rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-medium text-foreground select-none hover:bg-muted/70 active:cursor-grabbing"
+                      title="Drag this link to your bookmarks bar"
+                    >
+                      🔖 PitchGap Importer
+                    </a>
+                    <p className="text-xs text-muted-foreground">
+                      Drag the button above to your browser&apos;s bookmarks bar. You only do this once.
+                    </p>
+                  </div>
+
+                  {/* Step 2 — open popup and run bookmarklet */}
+                  <div className="rounded-lg border border-border bg-background/60 p-3 space-y-1.5">
+                    <p className="text-xs font-medium text-foreground">
+                      Step 2 &mdash; click to open the job page, then click the bookmarklet
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleOpenLinkedInPopup}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/50 bg-amber-500/20 px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/30 transition-colors"
+                    >
+                      Open job in popup →
+                    </button>
+                    <p className="text-xs text-muted-foreground">
+                      The job page opens with your LinkedIn session active. Click
+                      <strong> PitchGap Importer</strong> in your bookmarks bar
+                      and the description will appear here automatically.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <div className="mt-6 grid gap-4 md:grid-cols-2">
                 <div>
